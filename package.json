@@ -1,7 +1,6 @@
 {
   "name": "chat-tts-server",
   "version": "1.0.0",
-  "description": "Chat TTS estilo WhatsApp con Node.js y Socket.IO",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
