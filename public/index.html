@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Chat TTS Estilo WhatsApp</title>
+<style>
+body { font-family: "Helvetica Neue", Arial, sans-serif; background-color: #e5ddd5; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; transition: background-color 0.3s, color 0.3s; }
+header { background-color: #075e54; color: white; padding: 15px; font-size: 20px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; z-index: 1; }
+#chat { flex: 1; padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.message-container { max-width: 70%; display: flex; flex-direction: column; }
+.message-name { font-size: 12px; font-weight: bold; margin-bottom: 3px; }
+.message { padding: 10px 15px; border-radius: 25px; word-wrap: break-word; transition: background-color 0.3s, color 0.3s; }
+.sent { align-self: flex-end; border-radius: 25px 25px 0 25px; }
+.received { align-self: flex-start; border-radius: 25px 25px 25px 0; }
+#input-container { display: flex; padding: 10px; background-color: #f0f0f0; }
+#text { flex: 1; padding: 10px; border-radius: 25px; border: 1px solid #ccc; font-size: 16px; }
+button { margin-left: 10px; padding: 0 15px; border: none; border-radius: 25px; background-color: #075e54; color: white; font-size: 16px; cursor: pointer; }
+button:hover { opacity: 0.9; }
+
+/* POPUP AJUSTES */
+#settings-popup { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0); background-color: white; padding: 20px; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); z-index: 1000; width: 300px; text-align: center; transition: transform 0.5s cubic-bezier(.68,-0.55,.27,1.55); }
+#settings-popup.show { transform: translate(-50%, -50%) scale(1); }
+#settings-overlay { position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(0,0,0,0.4); z-index: 900; display: none; }
+#settings-overlay.show { display: block; }
+.toggle { position: relative; display: inline-block; width: 50px; height: 28px; }
+.toggle input { display: none; }
+.slider { position: absolute; cursor: pointer; top:0; left:0; right:0; bottom:0; background-color: #ccc; transition: 0.4s; border-radius: 28px; }
+.slider:before { position: absolute; content: ""; height: 22px; width: 22px; left: 3px; bottom: 3px; background-color: white; transition: 0.4s; border-radius: 50%; }
+input:checked + .slider { background-color: #075e54; }
+input:checked + .slider:before { transform: translateX(22px); }
+body.dark { background-color: #121212; color: #f0f0f0; }
+body.dark #chat { color: #f0f0f0; }
+body.dark #input-container { background-color: #1f1f1f; }
+body.dark .sent { color: white; }
+body.dark .received { color: #f0f0f0; }
+body.dark #settings-popup { background-color: #2c2c2c; color: white; }
+
+/* BLOQUEO CONTRASEÑA */
+#blur-overlay { position: fixed; top:0; left:0; right:0; bottom:0; background-color: rgba(0,0,0,0.4); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 2000; flex-direction: column; }
+#password-box { background-color: white; padding: 20px 30px; border-radius: 15px; text-align: center; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+#password-box input { padding: 10px; width: 200px; border-radius: 8px; border: 1px solid #ccc; margin-top: 10px; font-size: 16px; }
+#error-msg { color: red; font-size: 14px; margin-top: 10px; display: none; }
+</style>
+</head>
+<body>
+
+<!-- Overlay contraseña -->
+<div id="blur-overlay">
+    <div id="password-box">
+        <h2>PON LA CONTRASEÑA</h2>
+        <input type="password" id="password-input" placeholder="Contraseña">
+        <br>
+        <button onclick="checkPassword()">OK</button>
+        <div id="error-msg">Contraseña incorrecta</div>
+    </div>
+</div>
+
+<header>
+    Chat TTS
+    <button id="settings-btn" title="Ajustes">⚙️</button>
+</header>
+
+<div id="chat"></div>
+
+<div id="input-container">
+    <input type="text" id="text" placeholder="Escribe un mensaje...">
+    <button onclick="sendMessage()">Enviar</button>
+</div>
+
+<div id="settings-overlay"></div>
+<div id="settings-popup">
+    <h2>Ajustes</h2>
+    <p>Modo oscuro: 
+        <label class="toggle">
+            <input type="checkbox" id="dark-mode-toggle">
+            <span class="slider"></span>
+        </label>
+    </p>
+    <p>Silencioso: 
+        <label class="toggle">
+            <input type="checkbox" id="silent-toggle">
+            <span class="slider"></span>
+        </label>
+    </p>
+    <p>Tu nombre:</p>
+    <input type="text" id="username-input" placeholder="Tu nombre" style="width: 80%; padding:5px; border-radius:5px;">
+    <br><br>
+    <button onclick="closeSettings()">Cerrar</button>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+let username = "Tú";
+const correctPassword = "tetodelfin51";
+
+// Colores
+const myColor = '#dcf8c6';
+const friendColor = '#ffffff';
+
+// TTS silencioso
+const silentToggle = document.getElementById('silent-toggle');
+let silent = false;
+silentToggle.addEventListener('change',()=>{silent = silentToggle.checked;});
+
+// Socket.IO
+const socket = io();
+
+// Contraseña
+function checkPassword() {
+    const input = document.getElementById('password-input');
+    const error = document.getElementById('error-msg');
+    if(input.value === correctPassword){
+        document.getElementById('blur-overlay').style.display="none";
+    } else {
+        error.style.display="block";
+    }
+}
+
+// Ajustes
+const settingsBtn = document.getElementById('settings-btn');
+const settingsPopup = document.getElementById('settings-popup');
+const settingsOverlay = document.getElementById('settings-overlay');
+const darkToggle = document.getElementById('dark-mode-toggle');
+const usernameInput = document.getElementById('username-input');
+
+settingsBtn.onclick = ()=>{settingsPopup.classList.add('show'); settingsOverlay.classList.add('show'); usernameInput.value=username;}
+function closeSettings(){settingsPopup.classList.remove('show'); settingsOverlay.classList.remove('show');}
+darkToggle.addEventListener('change',()=>{document.body.classList.toggle('dark',darkToggle.checked);});
+usernameInput.addEventListener('input',()=>{username=usernameInput.value||"Tú";});
+
+// TTS función
+function speakText(text){if(silent)return; const utterance=new SpeechSynthesisUtterance(text); utterance.lang='es-ES'; utterance.rate=1; utterance.volume=1; speechSynthesis.speak(utterance);}
+
+// Enviar mensaje
+function sendMessage(){
+    const input=document.getElementById('text');
+    const text=input.value.trim();
+    if(!text)return;
+    const chat=document.getElementById('chat');
+
+    const sentContainer=document.createElement('div');
+    sentContainer.className='message-container sent';
+    const sentName=document.createElement('div');
+    sentName.className='message-name';
+    sentName.textContent=username;
+    const sentMsg=document.createElement('div');
+    sentMsg.className='message sent';
+    sentMsg.textContent=text;
+    sentMsg.style.backgroundColor=myColor;
+    sentContainer.appendChild(sentName);
+    sentContainer.appendChild(sentMsg);
+    chat.appendChild(sentContainer);
+    chat.scrollTop=chat.scrollHeight;
+    input.value='';
+
+    speakText(text); // TTS mensaje propio
+
+    socket.emit('sendMessage',{username,text});
+}
+
+// Recibir mensaje
+socket.on('receiveMessage',(data)=>{
+    const chat=document.getElementById('chat');
+    const recContainer=document.createElement('div');
+    recContainer.className='message-container received';
+    const recName=document.createElement('div');
+    recName.className='message-name';
+    recName.textContent=data.username;
+    const recMsg=document.createElement('div');
+    recMsg.className='message received';
+    recMsg.textContent=data.text;
+    recMsg.style.backgroundColor=friendColor;
+    recContainer.appendChild(recName);
+    recContainer.appendChild(recMsg);
+    chat.appendChild(recContainer);
+    chat.scrollTop=chat.scrollHeight;
+
+    speakText(data.text); // TTS mensaje recibido
+});
+
+// Enter para enviar
+document.getElementById('text').addEventListener('keydown',function(e){if(e.key==='Enter'){sendMessage(); e.preventDefault();}});
+</script>
+</body>
+</html>
